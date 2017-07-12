@@ -1,19 +1,19 @@
 #!/usr/bin/env python
 
+# From: https://github.com/brentp/bio-playground
+# Refer to included "bio-playground_LICENSE.txt" file for
+#     license and copyright statement.
+
 """
-Guess the encoding of a stream of qual lines.
+`%prog [options] <FASTQ>` OR `cat <FASTQ> | %prog [options]`
 
-Accepts only quality scores as input, either on STDIN or
-from a file provided as an argument.
-
-Use cases: `awk 'NR % 4 == 0' <FASTQ> | %prog [options]`,
-           `%prog [options] <quality scores file>`,
-           `samtools view <BAM file> | cut -f 5 | %prog [options]`
+guess the encoding of a stream of qual lines.
 """
 
 from __future__ import with_statement, division, print_function
 
 import fileinput
+import itertools
 import optparse
 import sys
 
@@ -24,7 +24,7 @@ RANGES = {
     'Illumina-1.8': (33, 74),
     'Solexa': (59, 104),
     'Illumina-1.3': (64, 104),
-    'Illumina-1.5': (67, 104)
+    'Illumina-1.5': (66, 105)
 }
 
 
@@ -67,7 +67,10 @@ def main():
 
     input_file = fileinput.input(args, openhook=fileinput.hook_compressed)
 
-    for i, line in enumerate(input_file):
+    # every 4th line following the 4th line
+    quality_scores = itertools.islice(input_file, 3, None, 4)
+
+    for i, line in enumerate(quality_scores):
         if i == 0:
             input_filename_for_disp = fileinput.filename()
 
