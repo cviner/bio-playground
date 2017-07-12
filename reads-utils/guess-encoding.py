@@ -90,20 +90,20 @@ def main():
                 break
 
             if len(valid) == 1 and opts.n == -1:
-                err_exit = True
+                # parsed entire file and found unique guess
                 break
 
         if opts.n > 0 and i > opts.n:
-            err_exit = True
+            # parsed up to specified portion; return current guess(es)
             break
-
-    print("{}\t{}\t{}".format(valid, gmin, gmax),
-          file=sys.stderr)
 
     input_file.close()
 
     if err_exit:
         sys.exit(1)
+    else:
+        print("{}\t{}\t{}".format(valid, gmin, gmax),
+              file=sys.stderr)
 
 
 if __name__ == "__main__":
