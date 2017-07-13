@@ -6,17 +6,15 @@
 #     license and copyright statement.
 
 """
-`%prog [options] <FASTQ>` OR `cat <FASTQ> | %prog [options]`
-
-Guess the encoding of a stream of qual lines.
+Guess the (quality-score) encoding of a FASTQ file.
 """
 
 from __future__ import with_statement, division, print_function
 
+import argparse
 import fileinput
 import itertools
 import operator
-import optparse
 import sys
 
 from collections import Counter
@@ -60,50 +58,74 @@ def get_encodings_in_range(rmin, rmax, ranges=RANGES):
     return valid_encodings
 
 
-def heuristic_filter(valid, qual_val_counts):
+def heuristic_filter(valid, qual_val_counts,
+                     disable_uncertain_heuristics=False):
     """Apply heuristics to particular ASCII value scores
        to try to narrow-down the encoding, beyond min/max.
     """
 
-    if 'Illumina-1.5' in valid:
+    is_valid_modified = False
+
+    if len(valid) > 1 and 'Illumina-1.5' in valid:
         # 64–65: Phread+64 quality scores of 0–1 ('@'–'A')
         #        unused in Illumina 1.5+
         if qual_val_counts[64] > 0 or qual_val_counts[65] > 0:
             valid.remove('Illumina-1.5')
 
-        # 66: Phread+64 quality score of 2 'B'
-        #     used by Illumina 1.5+ as QC indicator
-        elif 66 in map(operator.itemgetter(0),
-                       qual_val_counts.most_common(N_MOST_COMMON_THRESH)):
-            print("# A large number of 'B' quality scores (value 2, ASCII 66) "
-                  "were detected, which makes it likely that this encoding is "
-                  "Illumina-1.5, which has been returned as the only option.",
-                  file=sys.stderr)
-            valid = ['Illumina-1.5']
+            return valid, True
 
-    return valid
+        if not disable_uncertain_heuristics:
+            # 66: Phread+64 quality score of 2 'B'
+            #     used by Illumina 1.5+ as QC indicator
+            if 66 in map(operator.itemgetter(0),
+                         qual_val_counts.most_common(N_MOST_COMMON_THRESH)):
+                print("# A large number of 'B' scores (value 2, ASCII 66) "
+                      "were detected, making it likely that this encoding is "
+                      "Illumina-1.5, which is now the only guess made.",
+                      file=sys.stderr)
+
+                valid = ['Illumina-1.5']
+
+                return valid, True
+
+    return valid, is_valid_modified
 
 
 def main():
-    p = optparse.OptionParser(__doc__)
-    p.add_option("-n", dest="n", help="number of qual lines to test default:-1"
-                 " means test until end of file or until it it possible to "
-                 " determine a single file-type",
-                 type='int', default=-1)
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.
+                                     RawDescriptionHelpFormatter)
+    parser.add_argument('input_FASTQ', nargs='?', default='-',
+                        help="The full path to the "
+                        "FASTQ to process. or '-' or nothing to process "
+                        "from STDIN. Input files can be gzipped.")
+    parser.add_argument("-n", "--num_lines_to_test",
+                        help="Number of qual lines to test. "
+                        "By default, tests until the end of file or until "
+                        "it it possible to determine a unique encoding.",
+                        type=int, default=-1)
+    parser.add_argument('-d', '--disable_early_stop_from_heuristics',
+                        action='store_true', help="Disable any early-stopping "
+                        "from heuristics beyond min/max. Setting this "
+                        "prevents lack of information on min/max, "
+                        "due to not parsing most of the file.")
+    parser.add_argument('-D', '--disable_uncertain_heuristics',
+                        action='store_true', help="Disable any heuristics "
+                        "that involve a non-zero probability of error. "
+                        "Does not disable the use of typical ranges, "
+                        "which are themselves not entirely reliable.")
 
-    opts, args = p.parse_args()
-
-    if len(args) > 1:
-        print("Only a single input file is supported.", file=sys.stderr)
-        sys.exit(1)
+    args = parser.parse_args()
 
     gmin = 99
     gmax = 0
     valid = []
+    stop_updating_valid = False
 
     err_exit = False
 
-    input_file = fileinput.input(args, openhook=fileinput.hook_compressed)
+    input_file = fileinput.input(args.input_FASTQ,
+                                 openhook=fileinput.hook_compressed)
 
     # every 4th line following the 4th line
     quality_scores = itertools.islice(input_file, 3, None, 4)
@@ -122,9 +144,13 @@ def main():
 
         if lmin < gmin or lmax > gmax:
             gmin, gmax = min(lmin, gmin), max(lmax, gmax)
-            valid = get_encodings_in_range(gmin, gmax)
 
-            valid = heuristic_filter(valid, qual_val_counts)
+            if not stop_updating_valid:
+                valid = get_encodings_in_range(gmin, gmax)
+
+                valid, is_valid_modified = \
+                    heuristic_filter(valid, qual_val_counts,
+                                     args.disable_uncertain_heuristics)
 
             if len(valid) == 0:
                 print("no encodings for range: "
@@ -132,11 +158,18 @@ def main():
                 err_exit = True
                 break
 
-            if len(valid) == 1 and opts.n == -1:
+            if len(valid) == 1 and args.num_lines_to_test == -1:
                 # parsed entire file and found unique guess
-                break
+                if (not
+                    (is_valid_modified and args.
+                     disable_early_stop_from_heuristics)):
+                    # do not break if the unique guess is from a heuristic
+                    # and early stopping due to heuristics is prohibited
+                    break
+                elif is_valid_modified:
+                    stop_updating_valid = True
 
-        if opts.n > 0 and i > opts.n:
+        if args.num_lines_to_test > 0 and i > args.num_lines_to_test:
             # parsed up to specified portion; return current guess(es)
             break
 
