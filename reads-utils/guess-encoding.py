@@ -178,8 +178,7 @@ def main():
     if err_exit:
         sys.exit(1)
     else:
-        print("{}\t{}\t{}".format(valid, gmin, gmax),
-              file=sys.stderr)
+        print("{}\t{}\t{}".format(valid, gmin, gmax))
 
 
 if __name__ == "__main__":
